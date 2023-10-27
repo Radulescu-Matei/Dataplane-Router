@@ -1,0 +1,56 @@
+Radulescu Matei - Dataplane router
+
+Implementarea unui data plane pentru un route este realizata in limabjul c prin urmataorii pasi:
+
+1. Procesul de dirijare :
+    Verificarea destinaties este facut prin compararea mac-ului interfetei actual cu cel al destinatarului pachetului,
+    de asemenea un pachet destinat pentru broadcast este mereu acceptat, in cazul in care nu router-ul curent
+    este destinatia pachetul este aruncat.
+    
+    Daca pachetul este de tip Arp, programul apeleaza alta functia pentru tratarea lui, daca nu este nici ARP nici Ipv4,
+    pachetul este aruncat.
+
+    Checksum-ul vechi al pachetului este salvat, apoi este setat la 0 (pentru a nu avea probleme cand trebuie recalculat),
+    daca cel vech este diferit del cel nou calculat, inseamnsa ca este invalid si pachetul este aruncat.
+
+    Se verifica daca TTL pachetului este sub 2 si se arunca daca este. TTL-ul este apoi scazut, si checksum-ul actualizat,
+    deoarece s-a modificat TTL-ul cea ce il face sa se modifice.
+
+    Cutarea in tabela de rutare a pachetului destinatie este facuta printr-o cautare binara explicata in sectiunea 2. Daca 
+    pasul urmator nu are o intrate de tip arp in tabela noastra se trimite o cerere de tip ARP request pentru a afla mac-ul
+    acestuia (cu ip-ul extras din tabela de rutare).
+
+    Adresa de unde s-a trimis pachetul este acum data ca mac-ul interfetei intrarii extrase din tabela de rutare, destinatarul
+    este dat ca mac-ul ip-ului pasului urmator  al intrarii extrase din tabela de rutare, mac luat din tabele de arp. Apoi
+    pachetul este trimis mai departe pana ajunge in final la destiantie, sau este aruncat pe parcurs din cauza uneia dintre
+    exceptiile mentionate mai sus.
+
+2. Longest Prefix Match efficient (cautare binara din pacate nu destul de rapida pentru a trece testele :) ) :
+    Tabela de rutare este sortata, folosind qsort din c cu ajutorul unui comaparator, comparatorul compara prefixele
+    a doua intrari, dupaa ce masca fiecaruia a fost aplicata pe ea, in caz de egalitatea il alege pe cel cu masca mai mare.
+
+    Cautarea binara cauta elementul care are prefixul egal cu ip-ul dat, dupa ce masca a fost aplicate pe ele, salveaza
+    elementul si dupa ce a termiant de cautat, intoarce ultimul element de acest tip salvat. Daca este chiar ultimul
+    element si indeplineste conditia il intoarce chiar pe acesta.
+
+3. Protocolul ARP:
+    Daca in tabela de ARP-uri create exista deja intrarea necesaara, pentru pasul urmator catre destiantia cautata, acest
+    protocol nu este necesar.
+    In ca contrar, pachetul curent este pus intr-o coada pentru a fi trimis din nou in momentul primirii unui ARP reply si
+    se genereaza un arp request. Requestul trimite un pachet cu destinatar de tip broadcast si adresa de unde s-a trimis
+    adresa mac a interfetei extrase din tabelul de rutare. Tipurile de adrese ii sunt date ca mac(1) si marimea sa de 6 
+    (6 uint8 de marime 1), respectiv IPV4, cuz marimea sa egala cu un uint32 (4), adresa destinatarului este scrisa in arp
+    ca ip-ul cautat pentru pasul urmator al trimiterii pachetului nostru intial de IPV4 si mac-ul setat ca 0 pentru a il
+    gasi mai tarziu si trimite printr-un reply. Tipul lui (op) este setat ca 1 (request);
+    Cand un pachet de tip ARP este primite exista doua cazuri acesta este de tip reply sau request. Cel de tip request
+    creaza un reply prin punerea adresei celui ce a trimis request-ul in cele noi de destinatie, iar in cele de destinatie
+    adresele interfetei curente, restul campurilor din aceste headere sunt recrise pentru a evita probleme de tip hton/ntoh
+    la comparatii viitoare. Acest pachet se trimite inapoi la cel ce a trimit requestu-ul, evident daca interfata nu are ip-ul
+    cautat pachetul este aruncat.
+    In cazul in care este primit un reply, intrarea de tip arp este inclusa in tabela de arp-uri (cu ip-ul al carul mac nu il
+    cunosteam precedent). Dupa asta fiecare intrare din queue este extrasa si daca acum are intrare in tabela arp, aceasta
+    este trimisa din nou spre destinatie, cu destinatia data ca mac-ul gasit. Atfel se pun intr-o alta coada ce o inlocuieste
+    la sfarsitul operatiolor pe cea veche (elementele ce nu au primit reply raman in coada).
+
+
+4. Protocolul ICMP: NU ESTE IMPLEMENTAT
